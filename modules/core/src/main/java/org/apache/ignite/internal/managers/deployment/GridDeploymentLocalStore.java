@@ -102,14 +102,14 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
         Set<ClassLoader> obsoleteClsLdrs = U.newIdentityHashSet();
 
         synchronized (mux) {
-            // There can be obsolete class loaders after client node reconnect with the new node id.
+            // There can be obsolete class loaders in deployment indexes after client node reconnect with the new node id.
             for (GridDeployment dep : depByLdr.values())
                 if (!dep.classLoaderId().globalId().equals(ctx.localNodeId()))
                     obsoleteClsLdrs.add(dep.classLoader());
         }
 
-        for (ClassLoader ldr : obsoleteClsLdrs)
-            undeploy(ldr);
+        for (ClassLoader clsLdr : obsoleteClsLdrs)
+            undeploy(clsLdr);
     }
 
     /** {@inheritDoc} */
@@ -235,22 +235,22 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
      * @return Deployment.
      */
     @Nullable private GridDeployment deployment(final GridDeploymentMetadata meta) {
-        Map<ClassLoader, GridDeployment> depsSnp;
+        Map<ClassLoader, GridDeployment> deps;
 
         synchronized (mux) {
-            Map<ClassLoader, GridDeployment> deps = depsByAlias.get(meta.alias());
+            Map<ClassLoader, GridDeployment> cached = depsByAlias.get(meta.alias());
 
-            depsSnp = deps == null ? null : new IdentityHashMap<>(deps);
+            deps = cached == null ? null : new IdentityHashMap<>(cached);
         }
 
-        if (depsSnp != null) {
+        if (deps != null) {
             GridDeployment dep = null;
 
             if (meta.classLoader() != null)
-                dep = depsSnp.get(meta.classLoader());
+                dep = deps.get(meta.classLoader());
 
             if (dep == null && meta.classLoaderId() != null) {
-                for (GridDeployment d : depsSnp.values()) {
+                for (GridDeployment d : deps.values()) {
                     if (d.classLoaderId().equals(meta.classLoaderId())) {
                         dep = d;
 
@@ -267,15 +267,15 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
                 return dep;
             }
 
-            ClassLoader ldr = Thread.currentThread().getContextClassLoader();
+            ClassLoader appLdr = Thread.currentThread().getContextClassLoader();
 
-            if (ldr == null)
-                ldr = U.resolveClassLoader(ctx.config());
+            if (appLdr == null)
+                appLdr = U.resolveClassLoader(ctx.config());
 
-            ldr = (ldr instanceof GridDeploymentClassLoader) ? null : ldr;
+            appLdr = (appLdr instanceof GridDeploymentClassLoader) ? null : appLdr;
 
-            if (ldr != null)
-                dep = depsSnp.get(ldr);
+            if (appLdr != null)
+                dep = deps.get(appLdr);
 
             if (dep != null && !dep.undeployed()) {
                 if (log.isTraceEnabled())
@@ -539,9 +539,9 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
 
         synchronized (mux) {
             for (Iterator<Map<ClassLoader, GridDeployment>> i1 = depsByAlias.values().iterator(); i1.hasNext();) {
-                Map<ClassLoader, GridDeployment> ldrToDep = i1.next();
+                Map<ClassLoader, GridDeployment> deps = i1.next();
 
-                for (Iterator<Entry<ClassLoader, GridDeployment>> i2 = ldrToDep.entrySet().iterator(); i2.hasNext();) {
+                for (Iterator<Entry<ClassLoader, GridDeployment>> i2 = deps.entrySet().iterator(); i2.hasNext();) {
                     Entry<ClassLoader, GridDeployment> entry = i2.next();
 
                     GridDeployment dep = entry.getValue();
@@ -558,7 +558,7 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
                     }
                 }
 
-                if (ldrToDep.isEmpty())
+                if (deps.isEmpty())
                     i1.remove();
             }
 
