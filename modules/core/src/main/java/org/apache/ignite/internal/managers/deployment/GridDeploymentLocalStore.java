@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.UUID;
 import org.apache.ignite.IgniteCheckedException;
@@ -249,9 +248,9 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
             if (meta.classLoader() != null)
                 dep = deps.get(meta.classLoader());
 
-            if (dep == null && meta.classLoaderId() != null) {
+            if ((dep == null || dep.undeployed()) && meta.classLoaderId() != null) {
                 for (GridDeployment d : deps.values()) {
-                    if (d.classLoaderId().equals(meta.classLoaderId())) {
+                    if (d.classLoaderId().equals(meta.classLoaderId()) && !d.undeployed()) {
                         dep = d;
 
                         break;
@@ -535,37 +534,29 @@ class GridDeploymentLocalStore extends GridDeploymentStoreAdapter {
      * @param ldr Class loader to undeploy.
      */
     private void undeploy(ClassLoader ldr) {
-        Collection<GridDeployment> doomed = U.newIdentityHashSet();
+        GridDeployment dep;
 
         synchronized (mux) {
-            for (Iterator<Map<ClassLoader, GridDeployment>> i1 = depsByAlias.values().iterator(); i1.hasNext();) {
-                Map<ClassLoader, GridDeployment> deps = i1.next();
+            dep = depByLdr.remove(ldr);
 
-                for (Iterator<Entry<ClassLoader, GridDeployment>> i2 = deps.entrySet().iterator(); i2.hasNext();) {
-                    Entry<ClassLoader, GridDeployment> entry = i2.next();
+            if (dep != null) {
+                dep.undeploy();
 
-                    GridDeployment dep = entry.getValue();
+                if (log.isInfoEnabled())
+                    log.info("Removed undeployed class: " + dep);
 
-                    if (dep.classLoader() == ldr) {
-                        dep.undeploy();
+                for (Iterator<Map<ClassLoader, GridDeployment>> it = depsByAlias.values().iterator(); it.hasNext();) {
+                    Map<ClassLoader, GridDeployment> deps = it.next();
 
-                        i2.remove();
+                    deps.remove(ldr);
 
-                        doomed.add(dep);
-
-                        if (log.isInfoEnabled())
-                            log.info("Removed undeployed class: " + dep);
-                    }
+                    if (deps.isEmpty())
+                        it.remove();
                 }
-
-                if (deps.isEmpty())
-                    i1.remove();
             }
-
-            depByLdr.remove(ldr);
         }
 
-        for (GridDeployment dep : doomed) {
+        if (dep != null) {
             if (dep.obsolete()) {
                 // Resource cleanup.
                 ctx.resource().onUndeployed(dep);
