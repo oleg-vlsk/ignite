@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -164,9 +163,6 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
 
     /** Page size from memory configuration, may be set only for fake(standalone) IgniteCacheDataBaseSharedManager */
     private int pageSize;
-
-    /** Data regions for which the first page-eviction warning has been logged. */
-    private final Set<DataRegionConfiguration> evictWarnedRegions = Collections.newSetFromMap(new IdentityHashMap<>());
 
     /** Data storege metrics. */
     protected final DataStorageMetricsImpl dsMetrics;
@@ -1248,9 +1244,14 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
             return;
 
         while (memPlc.evictionTracker().evictionRequired()) {
+            boolean shouldWarn = !memPlc.metrics().isEvictionsStarted();
+
             memPlc.metrics().onPageEvictionsStarted();
 
-            warnFirstEvict(memPlc.config());
+            if (shouldWarn) {
+                U.warn(log, "Page-based evictions started." +
+                    " Consider increasing 'maxSize' on Data Region configuration: " + memPlc.config().getName());
+            }
 
             memPlc.evictionTracker().evictDataPage();
 
@@ -1586,24 +1587,6 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
      */
     public void lastCheckpointInapplicableForWalRebalance(int grpId) {
         // No-op.
-    }
-
-    /**
-     * Warns on first eviction.
-     * @param regCfg data region configuration.
-     */
-    private void warnFirstEvict(DataRegionConfiguration regCfg) {
-        boolean shouldWarn;
-
-        // Do not move warning output to synchronized block (it causes warning in IDE).
-        synchronized (this) {
-            shouldWarn = evictWarnedRegions.add(regCfg);
-        }
-
-        if (shouldWarn) {
-            U.warn(log, "Page-based evictions started." +
-                " Consider increasing 'maxSize' on Data Region configuration: " + regCfg.getName());
-        }
     }
 
     /**
