@@ -167,6 +167,9 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
     /** Data storege metrics. */
     protected final DataStorageMetricsImpl dsMetrics;
 
+    /** */
+    private final Object mux = new Object();
+
     /**
      * @param ctx Kernal context.
      */
@@ -1244,11 +1247,19 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
             return;
 
         while (memPlc.evictionTracker().evictionRequired()) {
-            boolean shouldWarn = !memPlc.metrics().isEvictionsStarted();
+            boolean shouldLog = false;
 
-            memPlc.metrics().onPageEvictionsStarted();
+            if (!memPlc.metrics().isEvictionsStarted()) {
+                synchronized (mux) {
+                    if (!memPlc.metrics().isEvictionsStarted()) {
+                        memPlc.metrics().onPageEvictionsStarted();
 
-            if (shouldWarn) {
+                        shouldLog = true;
+                    }
+                }
+            }
+
+            if (shouldLog) {
                 U.warn(log, "Page-based evictions started." +
                     " Consider increasing 'maxSize' on Data Region configuration: " + memPlc.config().getName());
             }
