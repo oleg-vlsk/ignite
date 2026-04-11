@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.ignite.cache.affinity.rendezvous.RendezvousAffinityFunction;
 import org.apache.ignite.cluster.ClusterState;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -32,18 +33,17 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.processors.cache.CacheGroupContext;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
 import org.apache.ignite.internal.processors.resource.DependencyResolver;
-import org.apache.ignite.internal.util.typedef.F;
+import org.apache.ignite.internal.util.lang.RunnableX;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.testframework.CallbackExecutorLogListener;
 import org.apache.ignite.testframework.ListeningTestLogger;
-import org.apache.ignite.testframework.LogListener;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.junit.Test;
 
-import static java.util.stream.Stream.of;
 import static org.apache.ignite.cache.CacheRebalanceMode.NONE;
+import static org.apache.ignite.testframework.GridTestUtils.waitForCondition;
 
-/** Class for testing the logging of eviction results. */
+/** Test class for verifying eviction result log messages. */
 public class LogEvictionResultsTest extends GridCommonAbstractTest {
     /** Number of keys to load into a partition. */
     private static final int KEY_CNT = 10;
@@ -51,7 +51,7 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     /** Number of partitions to move to the MOVING state. */
     private static final int PART_CNT = 3;
 
-    /** Pattern for extracting partitions ids from log messages #1. */
+    /** Pattern for extracting partition ids from log messages. */
     private static final Pattern CNT_PATTERN = Pattern.compile("p=(?<count>\\d+)");
 
     /** Listening test logger. */
@@ -87,7 +87,7 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     /** Flag indicating whether the cluster is configured as persistent. */
     private boolean isPersistentCluster;
 
-    /** Rebalance disabled flag. */
+    /** Flag indicating whether rebalance is disabled. */
     private boolean isRebalanceDisabled;
 
     /** {@inheritDoc} */
@@ -135,118 +135,6 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
         return cfg;
     }
 
-    /** Verifies accuracy of log messages indicating completion of partition clearing during rebalancing. */
-    @Test
-    public void testClearingDuringRebalance() throws Exception {
-        List<String> rebalPrepMsgs = new ArrayList<>();
-        List<String> rebalEvictMsgs = new ArrayList<>();
-
-        CallbackExecutorLogListener rebalPrepLsnr = new CallbackExecutorLogListener(
-            "Prepared rebalancing.*", rebalPrepMsgs::add);
-
-        CallbackExecutorLogListener rebalEvictLsnr = new CallbackExecutorLogListener(
-            "Following partitions have been successfully evicted in preparation for rebalancing.*",
-            rebalEvictMsgs::add);
-
-        testLog.registerAllListeners(of(rebalPrepLsnr, rebalEvictLsnr)
-            .toArray(LogListener[]::new));
-
-        startTestGrids();
-
-        compareListsDisregardOrder(
-            extractPartsCount(rebalPrepMsgs),
-            extractPartsCount(rebalEvictMsgs));
-    }
-
-    /** Verifies accuracy of log messages indicating completion of eviction, which may be required after changes in topology. */
-    @Test
-    public void testCheckEviction() {
-        String prepStr = "Partition has been scheduled for eviction \\((all affinity nodes are owners|this node " +
-            "is oldest non-affinity node)\\).*";
-
-        String evictStr = "Eviction completed successfully \\(eviction reason: partitions do " +
-            "not belong to affinity\\).*";
-
-        checkLogMessages(prepStr, evictStr, CNT_PATTERN, () -> {
-            try {
-                startTestGrids();
-            }
-            catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-    }
-
-    /** Verifies accuracy of log messages indicating completion of eviction when rebalancing is disabled. */
-    @Test
-    public void testRebalanceDisabled() {
-        String prepStr = "Evicting partition with rebalancing disabled \\(it does not belong to affinity\\).*";
-
-        String evictStr = "Eviction completed successfully \\(eviction reason: rebalancing " +
-            "disabled, partitions do not belong to affinity\\).*";
-
-        checkLogMessages(prepStr, evictStr, Pattern.compile("id=(?<count>\\d+)"), () -> {
-            isRebalanceDisabled = true;
-
-            try {
-                startTestGrids();
-            }
-            catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-    }
-
-    /** Verifies accuracy of log messages indicating completion of evicting partitions that are in the MOVING state. */
-    @Test
-    public void testEvictMovingPartitions() {
-        String prepStr = "Evicting MOVING partition \\(it does not belong to affinity\\).*";
-
-        String evictStr = "Eviction completed successfully \\(eviction reason: moving partitions, which " +
-            "do not belong to affinity\\).*";
-
-        checkLogMessages(prepStr, evictStr, CNT_PATTERN, () -> {
-            try {
-                isPersistentCluster = true;
-
-                startGrids(3);
-
-                grid(0).cluster().state(ClusterState.ACTIVE);
-
-                final List<Integer> evictedParts = evictingPartitionsAfterJoin(grid(2),
-                    grid(2).cache(DEFAULT_CACHE_NAME), PART_CNT);
-
-                evictedParts.forEach(p ->
-                    loadDataToPartition(p, getTestIgniteInstanceName(0), DEFAULT_CACHE_NAME, KEY_CNT, 0));
-
-                forceCheckpoint();
-
-                stopGrid(2);
-
-                evictedParts.forEach(p ->
-                    partitionKeys(grid(0).cache(DEFAULT_CACHE_NAME), p, KEY_CNT, 0)
-                        .forEach(k -> grid(0).cache(DEFAULT_CACHE_NAME).remove(k)));
-
-                startGrid(2, depResolverFunc.apply(evictedParts));
-
-                assertTrue(U.await(lock, GridDhtLocalPartitionSyncEviction.TIMEOUT, TimeUnit.MILLISECONDS));
-
-                startGrid(3);
-
-                resetBaselineTopology();
-
-                awaitPartitionMapExchange();
-
-                unlock.countDown();
-
-                awaitPartitionMapExchange();
-            }
-            catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-    }
-
     /** */
     private void startTestGrids() throws Exception {
         startGrids(2);
@@ -259,47 +147,142 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
         awaitPartitionMapExchange();
     }
 
+    /** Verifies log messages for partition clearing completion during rebalancing. */
+    @Test
+    public void testClearingDuringRebalance() throws Exception {
+        List<String> rebalPrepMsgs = new ArrayList<>();
+        List<String> rebalEvictMsgs = new ArrayList<>();
+
+        CallbackExecutorLogListener rebalPrepLsnr = new CallbackExecutorLogListener(
+            "Prepared rebalancing.*", rebalPrepMsgs::add);
+
+        CallbackExecutorLogListener rebalEvictLsnr = new CallbackExecutorLogListener(
+            "Following partitions have been successfully evicted in preparation for rebalancing.*",
+            rebalEvictMsgs::add);
+
+        testLog.registerAllListeners(rebalPrepLsnr, rebalEvictLsnr);
+
+        startTestGrids();
+
+        List<Integer> prepared = extractPartsCount(rebalPrepMsgs);
+        List<Integer> evicted = extractPartsCount(rebalEvictMsgs);
+
+        assertTrue(CollectionUtils.isEqualCollection(prepared, evicted));
+    }
+
+    /** Verifies log messages for eviction completion triggered by topology changes. */
+    @Test
+    public void testCheckEviction() throws Exception {
+        String prepStr = "Partition has been scheduled for eviction \\((all affinity nodes are owners|this node " +
+            "is oldest non-affinity node)\\).*";
+
+        String evictStr = "Eviction completed successfully \\(eviction reason: partitions do " +
+            "not belong to affinity\\).*";
+
+        checkLogMessages(prepStr, evictStr, CNT_PATTERN, this::startTestGrids);
+    }
+
+    /** Verifies log messages for eviction completion when rebalancing is disabled. */
+    @Test
+    public void testRebalanceDisabled() throws Exception {
+        String prepStr = "Evicting partition with rebalancing disabled \\(it does not belong to affinity\\).*";
+
+        String evictStr = "Eviction completed successfully \\(eviction reason: rebalancing " +
+            "disabled, partitions do not belong to affinity\\).*";
+
+        Pattern pat = Pattern.compile("id=(?<count>\\d+)");
+
+        checkLogMessages(prepStr, evictStr, pat, () -> {
+            isRebalanceDisabled = true;
+
+            startTestGrids();
+        });
+    }
+
+    /** Verifies log messages for eviction of partitions in MOVING state. */
+    @Test
+    public void testEvictMovingPartitions() throws Exception {
+        String prepStr = "Evicting MOVING partition \\(it does not belong to affinity\\).*";
+
+        String evictStr = "Eviction completed successfully \\(eviction reason: moving partitions, which " +
+            "do not belong to affinity\\).*";
+
+        checkLogMessages(prepStr, evictStr, CNT_PATTERN, () -> {
+            isPersistentCluster = true;
+
+            startGrids(3);
+
+            grid(0).cluster().state(ClusterState.ACTIVE);
+
+            final List<Integer> evictedParts = evictingPartitionsAfterJoin(grid(2),
+                grid(2).cache(DEFAULT_CACHE_NAME), PART_CNT);
+
+            evictedParts.forEach(p ->
+                loadDataToPartition(p, getTestIgniteInstanceName(0), DEFAULT_CACHE_NAME, KEY_CNT, 0));
+
+            forceCheckpoint();
+
+            stopGrid(2);
+
+            evictedParts.forEach(p -> partitionKeys(grid(0).cache(DEFAULT_CACHE_NAME), p, KEY_CNT, 0)
+                .forEach(k -> grid(0).cache(DEFAULT_CACHE_NAME).remove(k)));
+
+            startGrid(2, depResolverFunc.apply(evictedParts));
+
+            assertTrue(U.await(lock, GridDhtLocalPartitionSyncEviction.TIMEOUT, TimeUnit.MILLISECONDS));
+
+            startGrid(3);
+
+            resetBaselineTopology();
+
+            awaitPartitionMapExchange();
+
+            unlock.countDown();
+
+            awaitPartitionMapExchange();
+        });
+    }
+
     /**
-     * Verifies log messages related to preparing and evicting partitions during a test task.
+     * Verifies log messages produced during partition preparation and eviction.
      *
-     * @param prepStr Log message string indicating the preparation of partitions for eviction.
-     * @param evictStr Log message string indicating the completion of partition eviction.
-     * @param pattern Pattern used to extract partition information from debug log messages.
-     * @param testTask Test task to be executed during the logging process.
+     * @param prepMsg Log message indicating partition preparation for eviction.
+     * @param evictMsg Log message indicating completion of partition eviction.
+     * @param pat Pattern used to extract partition information from log messages.
+     * @param task Action that triggers the expected log output.
      */
-    private void checkLogMessages(String prepStr, String evictStr, Pattern pattern, Runnable testTask) {
+    private void checkLogMessages(String prepMsg, String evictMsg, Pattern pat, RunnableX task) throws Exception {
         setLoggerDebugLevel();
 
         List<String> partsPreparedMsgs = new ArrayList<>();
         List<String> partsEvictedMsgs = new ArrayList<>();
 
-        CallbackExecutorLogListener prepLsnr = new CallbackExecutorLogListener(prepStr, partsPreparedMsgs::add);
-        CallbackExecutorLogListener evictLsnr = new CallbackExecutorLogListener(evictStr, partsEvictedMsgs::add);
+        CallbackExecutorLogListener prepLsnr = new CallbackExecutorLogListener(prepMsg, partsPreparedMsgs::add);
+        CallbackExecutorLogListener evictLsnr = new CallbackExecutorLogListener(evictMsg, partsEvictedMsgs::add);
 
-        testLog.registerAllListeners(of(prepLsnr, evictLsnr).toArray(LogListener[]::new));
+        testLog.registerAllListeners(prepLsnr, evictLsnr);
 
-        testTask.run();
+        task.run();
 
-        compareListsDisregardOrder(
-            extractParts(partsPreparedMsgs, pattern),
-            extractParts(partsEvictedMsgs, Pattern.compile("evictedParts=\\[([^\\]]+)\\]")));
+        Pattern evictPat = Pattern.compile("evictedParts=\\[([^\\]]+)\\]");
+
+        assertTrue(waitForCondition(() -> {
+            List<Integer> prepared = extractParts(partsPreparedMsgs, pat);
+            List<Integer> evicted = extractParts(partsEvictedMsgs, evictPat);
+
+            return CollectionUtils.isEqualCollection(prepared, evicted);
+        }, 10_000));
     }
 
-    /**
-     * @param logMsgs List of log messages.
-     */
+    /** @param logMsgs List of log messages. */
     private List<Integer> extractPartsCount(List<String> logMsgs) {
         List<Integer> res = new ArrayList<>();
 
         for (String msg : logMsgs) {
             Matcher matcher = Pattern.compile("partitionsCount=(?<count>\\d+)").matcher(msg);
 
-            int sumForCurMsg = 0;
-
-            while (matcher.find())
-                sumForCurMsg += Integer.parseInt(matcher.group("count"));
-
-            res.add(sumForCurMsg);
+            if (matcher.find())
+                res.add(Integer.parseInt(matcher.group("count")));
         }
 
         return res;
@@ -324,15 +307,5 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
         }
 
         return res;
-    }
-
-    /**
-     * Asserts that two lists contain the same integer elements, regardless of order.
-     *
-     * @param list1 List one.
-     * @param list2 List two.
-     */
-    private void compareListsDisregardOrder(List<Integer> list1, List<Integer> list2) {
-        assertTrue( F.containsAll(list1, list2) && F.containsAll(list2, list1));
     }
 }

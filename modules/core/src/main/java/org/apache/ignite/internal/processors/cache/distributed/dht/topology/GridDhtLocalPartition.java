@@ -132,7 +132,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
     /** Rent future. */
     @GridToStringExclude
-    private final GridFutureAdapter<?> rent;
+    private final RentFuture rent;
 
     /** */
     @GridToStringExclude
@@ -176,9 +176,6 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     /** */
     private volatile long clearVer;
 
-    /** Partition clearing future. */
-    private ThreadLocal<IgniteInternalFuture<?>> partClearFut = new ThreadLocal<>();
-
     /**
      * @param ctx Context.
      * @param grp Cache group.
@@ -215,11 +212,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
             cacheMaps = null;
         }
 
-        rent = new GridFutureAdapter<Object>() {
-            @Override public String toString() {
-                return "PartitionRentFuture [part=" + GridDhtLocalPartition.this + ']';
-            }
-        };
+        rent = new RentFuture(id);
 
         int delQueueSize = grp.systemCache() ? 100 :
             Math.max(MAX_DELETE_QUEUE_SIZE / grp.affinity().partitions(), 20);
@@ -697,12 +690,10 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
      * @return Future to signal that this node is no longer an owner or backup or null if corresponding partition
      * state is {@code RENTING} or {@code EVICTED}.
      */
-    public IgniteInternalFuture<?> rent() {
+    public RentFuture rent() {
         long state0 = this.state.get();
 
         GridDhtPartitionState partState = getPartState(state0);
-
-        partClearFut.remove();
 
         if (partState == EVICTED)
             return rent;
@@ -710,14 +701,14 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
         if (partState == RENTING) {
             // If for some reason a partition has stuck in renting state try restart clearing.
             if (finishFutRef.get() == null)
-                partClearFut.set(clearAsync());
+                clearAsync();
 
             return rent;
         }
 
         if (tryInvalidateGroupReservations() && getReservations(state0) == 0 && casState(state0, RENTING)) {
             // Evict asynchronously, as the 'rent' method may be called from within write locks on local partition.
-            partClearFut.set(clearAsync());
+            clearAsync();
         }
         else
             delayedRenting = true;
@@ -1312,13 +1303,6 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     }
 
     /**
-     * @return Partition clearing future.
-     */
-    public IgniteInternalFuture<?> partClearFut() {
-        return partClearFut.get();
-    }
-
-    /**
      * Removed entry holder.
      */
     private static class RemovedEntryHolder {
@@ -1420,5 +1404,26 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
         }
 
         buf.a(']');
+    }
+
+    /** */
+    public class RentFuture extends GridFutureAdapter<Void> {
+        /** */
+        private final int partId;
+
+        /** */
+        public RentFuture(int partId) {
+            this.partId = partId;
+        }
+
+        /** */
+        public int partitionId() {
+            return partId;
+        }
+
+        /** {@inheritDoc} */
+        @Override public String toString() {
+            return "PartitionRentFuture [part=" + GridDhtLocalPartition.this + ']';
+        }
     }
 }
