@@ -173,25 +173,25 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     /** Verifies log messages for eviction completion triggered by topology changes. */
     @Test
     public void testCheckEviction() throws Exception {
-        String prepStr = "Partition has been scheduled for eviction \\((all affinity nodes are owners|this node " +
+        String prepMsg = "Partition has been scheduled for eviction \\((all affinity nodes are owners|this node " +
             "is oldest non-affinity node)\\).*";
 
-        String evictStr = "Eviction completed successfully \\[grp=default, reason='partitions no longer belong to affinity'.*";
+        String evictMsg = "Eviction completed successfully \\[grp=default, reason='partitions no longer belong to affinity'.*";
 
-        checkLogMessages(prepStr, evictStr, CNT_PATTERN, this::startTestGrids);
+        checkLogMessages(prepMsg, evictMsg, CNT_PATTERN, this::startTestGrids);
     }
 
     /** Verifies log messages for eviction completion when rebalancing is disabled. */
     @Test
     public void testRebalanceDisabled() throws Exception {
-        String prepStr = "Evicting partition with rebalancing disabled \\(it does not belong to affinity\\).*";
+        String prepMsg = "Evicting partition with rebalancing disabled \\(it does not belong to affinity\\).*";
 
-        String evictStr = "Eviction completed successfully \\[grp=default, reason='rebalancing is disabled " +
+        String evictMsg = "Eviction completed successfully \\[grp=default, reason='rebalancing is disabled " +
             "\\(partitions do not belong to affinity\\)'.*";
 
         Pattern pat = Pattern.compile("id=(?<count>\\d+)");
 
-        checkLogMessages(prepStr, evictStr, pat, () -> {
+        checkLogMessages(prepMsg, evictMsg, pat, () -> {
             isRebalanceDisabled = true;
 
             startTestGrids();
@@ -201,12 +201,12 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     /** Verifies log messages for eviction of partitions in MOVING state. */
     @Test
     public void testEvictMovingPartitions() throws Exception {
-        String prepStr = "Evicting MOVING partition \\(it does not belong to affinity\\).*";
+        String prepMsg = "Evicting MOVING partition \\(it does not belong to affinity\\).*";
 
-        String evictStr = "Eviction completed successfully \\[grp=default, " +
+        String evictMsg = "Eviction completed successfully \\[grp=default, " +
             "reason='MOVING partitions do not belong to affinity'.*";
 
-        checkLogMessages(prepStr, evictStr, CNT_PATTERN, () -> {
+        checkLogMessages(prepMsg, evictMsg, CNT_PATTERN, () -> {
             isPersistentCluster = true;
 
             startGrids(3);
@@ -253,11 +253,11 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     private void checkLogMessages(String prepMsg, String evictMsg, Pattern pat, RunnableX task) throws Exception {
         setLoggerDebugLevel();
 
-        List<String> partsPreparedMsgs = new ArrayList<>();
-        List<String> partsEvictedMsgs = new ArrayList<>();
+        List<String> preparedMsgs = new ArrayList<>();
+        List<String> evictedMsgs = new ArrayList<>();
 
-        CallbackExecutorLogListener prepLsnr = new CallbackExecutorLogListener(prepMsg, partsPreparedMsgs::add);
-        CallbackExecutorLogListener evictLsnr = new CallbackExecutorLogListener(evictMsg, partsEvictedMsgs::add);
+        CallbackExecutorLogListener prepLsnr = new CallbackExecutorLogListener(prepMsg, preparedMsgs::add);
+        CallbackExecutorLogListener evictLsnr = new CallbackExecutorLogListener(evictMsg, evictedMsgs::add);
 
         testLog.registerAllListeners(prepLsnr, evictLsnr);
 
@@ -266,8 +266,8 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
         Pattern evictPat = Pattern.compile("evictedParts=\\[([^\\]]+)\\]");
 
         assertTrue(waitForCondition(() -> {
-            List<Integer> prepared = extractParts(partsPreparedMsgs, pat);
-            List<Integer> evicted = extractParts(partsEvictedMsgs, evictPat);
+            List<Integer> prepared = extractParts(preparedMsgs, pat);
+            List<Integer> evicted = extractParts(evictedMsgs, evictPat);
 
             return CollectionUtils.isEqualCollection(prepared, evicted);
         }, 10_000));

@@ -212,7 +212,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
             cacheMaps = null;
         }
 
-        rent = new RentFuture(id);
+        rent = new RentFuture();
 
         int delQueueSize = grp.systemCache() ? 100 :
             Math.max(MAX_DELETE_QUEUE_SIZE / grp.affinity().partitions(), 20);
@@ -1409,16 +1409,8 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     /** */
     public class RentFuture extends GridFutureAdapter<Void> {
         /** */
-        private final int partId;
-
-        /** */
-        public RentFuture(int partId) {
-            this.partId = partId;
-        }
-
-        /** */
         public int partitionId() {
-            return partId;
+            return id;
         }
 
         /** {@inheritDoc} */
