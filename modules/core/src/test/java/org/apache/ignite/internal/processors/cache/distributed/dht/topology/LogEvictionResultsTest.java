@@ -176,8 +176,7 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
         String prepStr = "Partition has been scheduled for eviction \\((all affinity nodes are owners|this node " +
             "is oldest non-affinity node)\\).*";
 
-        String evictStr = "Eviction completed successfully \\(eviction reason: partitions do " +
-            "not belong to affinity\\).*";
+        String evictStr = "Eviction completed successfully \\[grp=default, reason='partitions no longer belong to affinity'.*";
 
         checkLogMessages(prepStr, evictStr, CNT_PATTERN, this::startTestGrids);
     }
@@ -187,8 +186,8 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     public void testRebalanceDisabled() throws Exception {
         String prepStr = "Evicting partition with rebalancing disabled \\(it does not belong to affinity\\).*";
 
-        String evictStr = "Eviction completed successfully \\(eviction reason: rebalancing " +
-            "disabled, partitions do not belong to affinity\\).*";
+        String evictStr = "Eviction completed successfully \\[grp=default, reason='rebalancing is disabled " +
+            "\\(partitions do not belong to affinity\\)'.*";
 
         Pattern pat = Pattern.compile("id=(?<count>\\d+)");
 
@@ -204,8 +203,8 @@ public class LogEvictionResultsTest extends GridCommonAbstractTest {
     public void testEvictMovingPartitions() throws Exception {
         String prepStr = "Evicting MOVING partition \\(it does not belong to affinity\\).*";
 
-        String evictStr = "Eviction completed successfully \\(eviction reason: moving partitions, which " +
-            "do not belong to affinity\\).*";
+        String evictStr = "Eviction completed successfully \\[grp=default, " +
+            "reason='MOVING partitions do not belong to affinity'.*";
 
         checkLogMessages(prepStr, evictStr, CNT_PATTERN, () -> {
             isPersistentCluster = true;
