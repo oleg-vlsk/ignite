@@ -153,7 +153,6 @@ import org.junit.runners.Suite;
     DefaultEnumMapperTest.class,
     IgniteDataTransferObjectProcessorTest.class,
     CompressedMessageTest.class,
-
     LogEvictionResultsTest.class,
 })
 public class IgniteBasicTestSuite {

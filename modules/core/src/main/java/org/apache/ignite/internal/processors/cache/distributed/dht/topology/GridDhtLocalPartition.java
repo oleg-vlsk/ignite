@@ -1415,7 +1415,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
         /** {@inheritDoc} */
         @Override public String toString() {
-            return "PartitionRentFuture [part=" + GridDhtLocalPartition.this + ']';
+            return S.toString(RentFuture.class, this);
         }
     }
 }
